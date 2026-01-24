@@ -1,0 +1,27 @@
+name: Forex Alert Bot
+on:
+  schedule:
+    - cron: '0 * * * *' # 毎時0分に実行
+  workflow_dispatch:    # 手動実行ボタンを有効化
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get FX and Analysis
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # 1. 為替取得
+          USDJPY=$(curl -s "https://open.er-api.com/v6/latest/USD" | jq '.rates.JPY')
+          # 2. Geminiで分析
+          ANALYSIS=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d "{\"contents\": [{\"parts\":[{\"text\": \"現在1ドル${USDJPY}円です。テクニカル分析して、買うべきなら'ACTION:BUY'、待機なら'ACTION:WAIT'と含めて理由を短く答えて。\"}]}]}" \
+            | jq -r '.candidates[0].content.parts[0].text')
+          
+          echo "RESULT=$ANALYSIS" >> $GITHUB_ENV
+          if [[ "$ANALYSIS" == *"ACTION:BUY"* ]]; then echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV; fi
+
+      # ここでメール送信アクション（通知設定）が入る
