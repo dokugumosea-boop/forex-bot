@@ -1,27 +1,69 @@
 name: Forex Alert Bot
+
 on:
   schedule:
-    - cron: '0 * * * *' # 毎時0分に実行
-  workflow_dispatch:    # 手動実行ボタンを有効化
+    - cron: '0 * * * *' # 1時間に1回実行
+  workflow_dispatch:      # 手動実行用ボタンを表示
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    env:
+      SHOULD_NOTIFY: false # 初期値を設定しておく
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Get FX and Analysis
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. 為替取得
+          # 1. 為替取得 (USD/JPY)
           USDJPY=$(curl -s "https://open.er-api.com/v6/latest/USD" | jq '.rates.JPY')
+          echo "Current USDJPY: $USDJPY"
+
           # 2. Geminiで分析
-          ANALYSIS=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
+          # ※テスト用に必ずBUYを出すよう指示
+          ANALYSIS=$(curl -s \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
             -H 'Content-Type: application/json' \
             -X POST \
-            -d "{\"contents\": [{\"parts\":[{\"text\": \"現在1ドル${USDJPY}円です。テクニカル分析して、買うべきなら'ACTION:BUY'、待機なら'ACTION:WAIT'と含めて理由を短く答えて。\"}]}]}" \
-            | jq -r '.candidates[0].content.parts[0].text')
-          
-          echo "RESULT=$ANALYSIS" >> $GITHUB_ENV
-          if [[ "$ANALYSIS" == *"ACTION:BUY"* ]]; then echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV; fi
+            -d "{
+              \"contents\": [{
+                \"parts\":[{
+                  \"text\": \"テストです。必ず最初に'ACTION:BUY'と書いてから、現在のドル円${USDJPY}円について短くコメントして。\"
+                }]
+              }]
+            }" | jq -r '.candidates[0].content.parts[0].text')
 
+          # 結果を環境変数に保存
+          echo "RESULT<<EOF" >> $GITHUB_ENV
+          echo "$ANALYSIS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          # 判定（空でなければ通知フラグを立てる）
+          if [ ! -z "$ANALYSIS" ]; then
+            echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
+          fi
+
+      - name: Send Notification via Gmail
+       # env. ではなく ${{ env. }} を使う（または単に env.変数名）
+        if: ${{ env.SHOULD_NOTIFY == 'true' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          # SMTPサーバーの設定 (Gmail用)
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }} # Gmailのアプリパスワード
+          
+          # メールの内容設定
+          subject: "【FXアラート】ドル円分析結果"
+          to: ${{ secrets.MAIL_TO }} # 送信先メールアドレス
+          from: Gemini Forex Bot
+          body: |
+            FX分析ボットからの通知です。
+            
+            ${{ env.RESULT }}
       # ここでメール送信アクション（通知設定）が入る
