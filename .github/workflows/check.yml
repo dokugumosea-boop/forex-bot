@@ -21,53 +21,48 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. 為替取得
+          # 為替取得
           USDJPY=$(curl -s "https://open.er-api.com/v6/latest/USD" | jq '.rates.JPY')
           DATE=$(date '+%Y-%m-%d %H:%M')
 
-          # 2. APIキーが入っているかチェック（空ならここで止める）
           if [ -z "$GEMINI_API_KEY" ]; then
-            echo "Error: GEMINI_API_KEY is not set in GitHub Secrets."
+            echo "Error: GEMINI_API_KEY is not set."
             exit 1
           fi
 
-          # 3. Gemini APIへのリクエスト (JSONを一時ファイルに書き出すことでミスを防ぐ)
-          cat <<EOT > payload.json
-          {
-            "contents": [{
-              "parts":[{
-                "text": "Current USD/JPY: ${USDJPY} (${DATE}). Provide a professional trader's report. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Write brief reasons. 3. Provide Japanese translation below."
-              }]
-            }]
-          }
-          EOT
-
-          # 4. API実行
+          # APIリクエスト (最も安全な構造)
           RESPONSE=$(curl -s -X POST \
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
-            -d @payload.json)
+            -d "{
+              \"contents\": [{
+                \"parts\":[{
+                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Analysis as FX trader. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Brief reasons. 3. Japanese translation below.\"
+                }]
+              }]
+            }")
 
-          # デバッグ用：API応答の1行目をログに出力（エラー内容の特定に役立つ）
           echo "Debug API Response: $RESPONSE"
 
-          # 5. 結果の抽出
-          # jqの結果がnullや空の場合はエラーメッセージを入れる
+          # 結果の抽出
           ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
 
-          if [ -z "$ANALYSIS" ]; then
-            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown API Error"')
-            ANALYSIS="Error: Gemini API failed to generate text. Reason: $ERROR_MSG"
+          if [ -z "$ANALYSIS" ] || [ "$ANALYSIS" == "null" ]; then
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown Error"')
+            ANALYSIS="Error: Gemini API failed. Reason: $ERROR_MSG"
           fi
           
-          echo "REPORT_BODY<<EOF" >> $GITHUB_ENV
-          echo "$ANALYSIS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # GitHub環境変数への保存 (ヒアドキュメント形式)
+          {
+            echo "REPORT_BODY<<EOF"
+            echo "$ANALYSIS"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
           if [[ "$ANALYSIS" == *"ACTION: BUY"* ]]; then
-            echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
+            echo "SHOULD_NOTIFY=true" >> "$GITHUB_ENV"
           else
-            echo "SHOULD_NOTIFY=false" >> $GITHUB_ENV
+            echo "SHOULD_NOTIFY=false" >> "$GITHUB_ENV"
           fi
 
       - name: Show Report in Summary
