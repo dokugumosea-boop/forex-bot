@@ -30,14 +30,15 @@ jobs:
             exit 1
           fi
 
-          # 2. APIリクエスト (URLをv1に変更し、モデル名を明示的に指定)
+          # 2. APIリクエスト (URLはv1beta、モデル名はmodels/gemini-1.5-flash)
+          # モデル名に 'models/' プレフィックスを付けるのが現在の推奨です
           RESPONSE=$(curl -s -X POST \
-            "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{
               \"contents\": [{
                 \"parts\":[{
-                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Provide a professional trader's report. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Brief reasons. 3. Provide Japanese translation below.\"
+                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Analysis as FX trader. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Brief reasons. 3. Japanese translation below.\"
                 }]
               }]
             }")
