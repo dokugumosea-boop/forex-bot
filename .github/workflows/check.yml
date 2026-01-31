@@ -1,69 +1,81 @@
-name: Forex Alert Bot
+name: Daily Forex Bilingual Report Bot
 
 on:
   schedule:
-    - cron: '0 * * * *' # 1時間に1回実行
-  workflow_dispatch:      # 手動実行用ボタンを表示
+    - cron: '0 0 * * *' # 毎日日本時間 9:00
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  forex-report:
     runs-on: ubuntu-latest
-    env:
-      SHOULD_NOTIFY: false # 初期値を設定しておく
+    permissions:
+      issues: write
+      contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get FX and Analysis
+      - name: Get Rates and Analyze
+        id: analyze
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. 為替取得 (USD/JPY)
           USDJPY=$(curl -s "https://open.er-api.com/v6/latest/USD" | jq '.rates.JPY')
-          echo "Current USDJPY: $USDJPY"
+          DATE=$(date '+%Y-%m-%d %H:%M')
 
-          # 2. Geminiで分析
-          # ※テスト用に必ずBUYを出すよう指示
+          # Geminiへの指示：英語と日本語で出力するように指定
+          PROMPT="Current USD/JPY rate: ${USDJPY} (${DATE}). 
+          Please act as a professional FX trader and provide a market report.
+          
+          OUTPUT FORMAT:
+          1. Action: Start with 'ACTION: BUY' or 'ACTION: WAIT'.
+          2. Report: Provide a brief analysis with 3 points for the action.
+          3. Translation: Provide the Japanese translation for everything above.
+          
+          ---
+          現在1ドル${USDJPY}円です。プロのFXトレーダーとしてレポートを作成してください。
+          
+          出力形式：
+          1. 判定: 最初に 'ACTION: BUY' または 'ACTION: WAIT' と明記してください。
+          2. レポート: その判定の理由を3点、英語で作成してください。
+          3. 日本語訳: 上記のレポート内容をすべて日本語で翻訳してください。"
+
           ANALYSIS=$(curl -s \
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
             -H 'Content-Type: application/json' \
             -X POST \
             -d "{
-              \"contents\": [{
-                \"parts\":[{
-                  \"text\": \"テストです。必ず最初に'ACTION:BUY'と書いてから、現在のドル円${USDJPY}円について短くコメントして。\"
-                }]
-              }]
+              \"contents\": [{\"parts\":[{\"text\": \"$PROMPT\"}]}]
             }" | jq -r '.candidates[0].content.parts[0].text')
 
-          # 結果を環境変数に保存
-          echo "RESULT<<EOF" >> $GITHUB_ENV
+          # 環境変数への保存（マルチライン対応）
+          echo "REPORT_BODY<<EOF" >> $GITHUB_ENV
           echo "$ANALYSIS" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-          
-          # 判定（空でなければ通知フラグを立てる）
-          if [ ! -z "$ANALYSIS" ]; then
+
+          # 判定チェック
+          if [[ "$ANALYSIS" == *"ACTION: BUY"* ]]; then
             echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
+          else
+            echo "SHOULD_NOTIFY=false" >> $GITHUB_ENV
           fi
 
-      - name: Send Notification via Gmail
-       # env. ではなく ${{ env. }} を使う（または単に env.変数名）
-        if: ${{ env.SHOULD_NOTIFY == 'true' }}
-        uses: dawidd6/action-send-mail@v3
+      - name: Show Report in Summary
+        run: |
+          echo "## 📊 Forex Analysis Report (EN/JP)" >> $GITHUB_STEP_SUMMARY
+          echo "$REPORT_BODY" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Notification (Create Issue)
+        if: env.SHOULD_NOTIFY == 'true'
+        uses: actions/github-script@v7
         with:
-          # SMTPサーバーの設定 (Gmail用)
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }} # Gmailのアプリパスワード
-          
-          # メールの内容設定
-          subject: "【FXアラート】ドル円分析結果"
-          to: ${{ secrets.MAIL_TO }} # 送信先メールアドレス
-          from: Gemini Forex Bot
-          body: |
-            FX分析ボットからの通知です。
-            
-            ${{ env.RESULT }}
-      # ここでメール送信アクション（通知設定）が入る
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 FX BUY Alert / 為替買いシグナル通知',
+              body: process.env.REPORT_BODY
+            })
+        env:
+          REPORT_BODY: ${{ env.REPORT_BODY }}
