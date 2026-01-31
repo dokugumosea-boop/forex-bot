@@ -33,7 +33,7 @@ jobs:
           # 2. APIリクエスト (URLはv1beta、モデル名はmodels/gemini-1.5-flash)
           # モデル名に 'models/' プレフィックスを付けるのが現在の推奨です
           RESPONSE=$(curl -s -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{
               \"contents\": [{
