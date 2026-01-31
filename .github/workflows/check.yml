@@ -30,15 +30,15 @@ jobs:
             exit 1
           fi
 
-          # 2. APIリクエスト (URLはv1beta、モデル名はmodels/gemini-1.5-flash)
-          # モデル名に 'models/' プレフィックスを付けるのが現在の推奨です
+          # 2. APIリクエスト (URLを v1 に変更)
+          # モデル名から 'models/' を抜いたシンプルな形式も試せるよう、URLに直接組み込みます
           RESPONSE=$(curl -s -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}" \
+            "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{
               \"contents\": [{
                 \"parts\":[{
-                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Analysis as FX trader. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Brief reasons. 3. Japanese translation below.\"
+                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Provide a professional trader's report. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Brief reasons. 3. Provide Japanese translation below.\"
                 }]
               }]
             }")
@@ -53,7 +53,6 @@ jobs:
             ANALYSIS="Error: Gemini API failed. Reason: $ERROR_MSG"
           fi
           
-          # GitHub環境変数への保存
           {
             echo "REPORT_BODY<<EOF"
             echo "$ANALYSIS"
