@@ -17,44 +17,37 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Get Rates and Analyze
-        id: analyze
+        id: forex_analysis  # 重複を避けるために名前を変更しました
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          # 1. 為替取得
           USDJPY=$(curl -s "https://open.er-api.com/v6/latest/USD" | jq '.rates.JPY')
           DATE=$(date '+%Y-%m-%d %H:%M')
 
-          # Geminiへの指示：英語と日本語で出力するように指定
-          PROMPT="Current USD/JPY rate: ${USDJPY} (${DATE}). 
-          Please act as a professional FX trader and provide a market report.
-          
-          OUTPUT FORMAT:
-          1. Action: Start with 'ACTION: BUY' or 'ACTION: WAIT'.
-          2. Report: Provide a brief analysis with 3 points for the action.
-          3. Translation: Provide the Japanese translation for everything above.
-          
-          ---
-          現在1ドル${USDJPY}円です。プロのFXトレーダーとしてレポートを作成してください。
-          
-          出力形式：
-          1. 判定: 最初に 'ACTION: BUY' または 'ACTION: WAIT' と明記してください。
-          2. レポート: その判定の理由を3点、英語で作成してください。
-          3. 日本語訳: 上記のレポート内容をすべて日本語で翻訳してください。"
-
-          ANALYSIS=$(curl -s \
+          # 2. Gemini APIへのリクエスト (安全な書き方に修正)
+          RESPONSE=$(curl -s -X POST \
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
             -H 'Content-Type: application/json' \
-            -X POST \
             -d "{
-              \"contents\": [{\"parts\":[{\"text\": \"$PROMPT\"}]}]
-            }" | jq -r '.candidates[0].content.parts[0].text')
+              \"contents\": [{
+                \"parts\":[{
+                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Provide a professional trader's report. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Write brief reasons. 3. Provide Japanese translation below. / 現在1ドル${USDJPY}円です。プロ視点のレポートを英語と日本語で作成して。\"
+                }]
+              }]
+            }")
 
-          # 環境変数への保存（マルチライン対応）
+          # APIの応答をログに出力（デバッグ用）
+          echo "API Response: $RESPONSE"
+
+          # 3. 結果の抽出と環境変数への保存
+          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: API response is empty or invalid"')
+          
           echo "REPORT_BODY<<EOF" >> $GITHUB_ENV
           echo "$ANALYSIS" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          # 判定チェック
+          # 4. 判定フラグの設定
           if [[ "$ANALYSIS" == *"ACTION: BUY"* ]]; then
             echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
           else
@@ -69,6 +62,8 @@ jobs:
       - name: Send Notification (Create Issue)
         if: env.SHOULD_NOTIFY == 'true'
         uses: actions/github-script@v7
+        env:
+          REPORT_BODY: ${{ env.REPORT_BODY }}
         with:
           script: |
             github.rest.issues.create({
@@ -77,5 +72,3 @@ jobs:
               title: '🚨 FX BUY Alert / 為替買いシグナル通知',
               body: process.env.REPORT_BODY
             })
-        env:
-          REPORT_BODY: ${{ env.REPORT_BODY }}
