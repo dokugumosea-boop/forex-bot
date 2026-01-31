@@ -2,7 +2,7 @@ name: Daily Forex Bilingual Report Bot
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 毎日日本時間 9:00
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Get Rates and Analyze
-        id: forex_analysis  # 重複を避けるために名前を変更しました
+        id: forex_analysis
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
@@ -25,29 +25,45 @@ jobs:
           USDJPY=$(curl -s "https://open.er-api.com/v6/latest/USD" | jq '.rates.JPY')
           DATE=$(date '+%Y-%m-%d %H:%M')
 
-          # 2. Gemini APIへのリクエスト (安全な書き方に修正)
-          RESPONSE=$(curl -s -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
-            -H 'Content-Type: application/json' \
-            -d "{
-              \"contents\": [{
-                \"parts\":[{
-                  \"text\": \"Current USD/JPY: ${USDJPY} (${DATE}). Provide a professional trader's report. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Write brief reasons. 3. Provide Japanese translation below. / 現在1ドル${USDJPY}円です。プロ視点のレポートを英語と日本語で作成して。\"
-                }]
+          # 2. APIキーが入っているかチェック（空ならここで止める）
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "Error: GEMINI_API_KEY is not set in GitHub Secrets."
+            exit 1
+          fi
+
+          # 3. Gemini APIへのリクエスト (JSONを一時ファイルに書き出すことでミスを防ぐ)
+          cat <<EOT > payload.json
+          {
+            "contents": [{
+              "parts":[{
+                "text": "Current USD/JPY: ${USDJPY} (${DATE}). Provide a professional trader's report. 1. Start with 'ACTION: BUY' or 'ACTION: WAIT'. 2. Write brief reasons. 3. Provide Japanese translation below."
               }]
-            }")
+            }]
+          }
+          EOT
 
-          # APIの応答をログに出力（デバッグ用）
-          echo "API Response: $RESPONSE"
+          # 4. API実行
+          RESPONSE=$(curl -s -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -d @payload.json)
 
-          # 3. 結果の抽出と環境変数への保存
-          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: API response is empty or invalid"')
+          # デバッグ用：API応答の1行目をログに出力（エラー内容の特定に役立つ）
+          echo "Debug API Response: $RESPONSE"
+
+          # 5. 結果の抽出
+          # jqの結果がnullや空の場合はエラーメッセージを入れる
+          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
+
+          if [ -z "$ANALYSIS" ]; then
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown API Error"')
+            ANALYSIS="Error: Gemini API failed to generate text. Reason: $ERROR_MSG"
+          fi
           
           echo "REPORT_BODY<<EOF" >> $GITHUB_ENV
           echo "$ANALYSIS" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          # 4. 判定フラグの設定
           if [[ "$ANALYSIS" == *"ACTION: BUY"* ]]; then
             echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
           else
